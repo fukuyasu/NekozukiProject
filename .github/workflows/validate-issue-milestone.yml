@@ -1,0 +1,23 @@
+name: Validate issue milestone
+
+on:
+  issues:
+    types: [opened, edited, reopened, milestoned, demilestoned, closed]
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  validate-issue-milestone:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: GitHub上のMilestoneを検査する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: bash scripts/issue/validate-milestone.sh "$ISSUE_NUMBER"

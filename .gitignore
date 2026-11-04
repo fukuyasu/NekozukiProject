@@ -1,0 +1,61 @@
+.gradle/
+**/build/
+/build/
+
+# Gradle wrapper
+gradle/wrapper/
+
+# Gradle caches
+.gradle/
+
+# Eclipse
+.classpath
+.project
+.settings/
+
+# IntelliJ
+*.iml
+.idea/
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and temp
+*.log
+tmp/
+.tmp/
+docs/temp/
+/docs/ref/springboot_samples/
+/docs/weekly-summary_*.html
+/docs/weekly-summary-data/
+*.tmp
+
+# Compiled classes and archives
+*.class
+*.jar
+*.war
+*.ear
+
+# Native binaries
+bin/
+
+# Maven
+target/
+
+# Misc
+coverage/
+
+# Keep gradle wrapper properties/jar in repo but ignore other wrapper caches
+**/gradle/wrapper/*-all.zip
+
+# Ignore build output under any module
+*/build/
+
+# Ignore IDE specific files
+*.iml
+*.ipr
+*.iws

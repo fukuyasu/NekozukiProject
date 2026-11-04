@@ -1,0 +1,25 @@
+name: Validate pull request body
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  validate-pr-body:
+    runs-on: ubuntu-latest
+    steps:
+      # PR側で検査を無効化できないよう、常にmainの検査スクリプトを使う。
+      # PRのコードはcheckout・実行しない。
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: PR本文の必須項目を検査する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: printf '%s' "$PR_BODY" | bash scripts/pr/validate-body.sh --stdin --check-related-issues
