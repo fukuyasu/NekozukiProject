@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <title>SpringBoot SampleZ-1</title>
+</head>
+
+<body>
+  <h1>Hello Image!</h1>
+  リロードすると表示される画像が変わります
+  <p>
+  <div>
+    <!--thymeleafを利用してjavaから値を受けるとき，ModelMapの変数名を指定のとおりに囲むと良い
+    下記の例ではimg1にはimageUrl(1~3の文字)，img2にはimageUrl2(.png)が入る-->
+    <!--Pathパラメータ-->
+    <img th:src="@{/image/{img1}{img2}(img1=${imageUrl},img2=${imageUrl2})}" />
+    <img th:src="@{/image/{img3}(img3=${imageUrl3})}" />
+
+  </div>
+
+</body>
+
+</html>

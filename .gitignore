@@ -29,7 +29,6 @@ Thumbs.db
 tmp/
 .tmp/
 docs/temp/
-/docs/ref/springboot_samples/
 /docs/weekly-summary_*.html
 /docs/weekly-summary-data/
 *.tmp

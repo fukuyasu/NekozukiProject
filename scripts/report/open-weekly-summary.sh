@@ -24,8 +24,7 @@ if [[ -z "$POWERSHELL_EXE" ]]; then
 fi
 [[ -n "$POWERSHELL_EXE" ]] || { echo 'エラー: Windows PowerShellが見つかりません。' >&2; exit 1; }
 
-LOGIN="$(gh api user --jq .login)"
-STUDENT="$LOGIN"
+STUDENT=""
 STUDENT_SPECIFIED=false
 if [[ "${1:-}" == "--student" ]]; then
   [[ "$#" -ge 2 ]] || { echo 'エラー: --student にはGitHub名が必要です。' >&2; exit 2; }
@@ -33,7 +32,6 @@ if [[ "${1:-}" == "--student" ]]; then
   STUDENT_SPECIFIED=true
   shift 2
 fi
-[[ "$STUDENT" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] || { echo 'エラー: 学生のGitHub名が不正です。' >&2; exit 2; }
 [[ "$#" -le 1 ]] || { echo "使い方: $0 [--student GitHub名] [JSONファイル]" >&2; exit 2; }
 DATA_FILE="${1:-}"
 if [[ "$DATA_FILE" =~ ^docs/weekly-summary-data/([A-Za-z0-9-]+)/[^/]+\.json$ ]]; then
@@ -44,6 +42,8 @@ if [[ "$DATA_FILE" =~ ^docs/weekly-summary-data/([A-Za-z0-9-]+)/[^/]+\.json$ ]];
   fi
   STUDENT="$FILE_STUDENT"
 fi
+if [[ -z "$STUDENT" ]]; then STUDENT="$(gh api user --jq .login)"; fi
+[[ "$STUDENT" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] || { echo 'エラー: 学生のGitHub名が不正です。' >&2; exit 2; }
 REPORT_FILE="docs/weekly-summary_${STUDENT}.html"
 DATA_DIR="docs/weekly-summary-data/${STUDENT}"
 
@@ -55,9 +55,5 @@ fi
 [[ -f "$DATA_FILE" ]] || { echo "エラー: JSONが見つかりません: ${DATA_FILE}" >&2; exit 1; }
 [[ -f "$REPORT_FILE" ]] || { echo "エラー: HTMLが見つかりません。先に weekly-summary.sh を実行してください。" >&2; exit 1; }
 
-PORT="$((18000 + RANDOM % 1000))"
-"$POWERSHELL_EXE" -NoProfile -ExecutionPolicy Bypass -File "${SCRIPT_DIR}/server-weekly-summary.ps1" -HtmlPath "$(pwd -W)/${REPORT_FILE}" -DataPath "$(pwd -W)/${DATA_FILE}" -GhPath "$(cygpath -w "$(command -v gh)")" -Port "$PORT" >/dev/null 2>&1 &
-sleep 1
 echo "表示するJSON: ${DATA_FILE}"
-echo "URL: http://127.0.0.1:${PORT}/"
-"$POWERSHELL_EXE" -NoProfile -Command "Start-Process 'http://127.0.0.1:${PORT}/'" >/dev/null 2>&1 || true
+"$POWERSHELL_EXE" -NoProfile -ExecutionPolicy Bypass -File "${SCRIPT_DIR}/start-weekly-summary.ps1" -HtmlPath "$(pwd -W)/${REPORT_FILE}" -DataPath "$(pwd -W)/${DATA_FILE}" -GhPath "$(cygpath -w "$(command -v gh)")"

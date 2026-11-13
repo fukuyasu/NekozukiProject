@@ -1,8 +1,9 @@
-param(
+﻿param(
   [string]$HtmlPath,
   [string]$DataPath,
   [string]$GhPath,
-  [int]$Port
+  [int]$Port,
+  [string]$ErrorLogPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,9 +17,8 @@ $HtmlPath = (Resolve-Path -LiteralPath $HtmlPath).Path
 $DataPath = (Resolve-Path -LiteralPath $DataPath).Path
 $GhPath = (Resolve-Path -LiteralPath $GhPath).Path
 $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
-$listener.Start()
 $startedAt = Get-Date
-$lastHeartbeat = $null
+$lastActivity = $startedAt
 $bulmaPath = Join-Path (Split-Path -Path $HtmlPath -Parent) 'assets\vendor\bulma-1.0.4.min.css'
 $dataDirectory = Split-Path -Path $DataPath -Parent
 $previewCache = @{}
@@ -185,12 +185,12 @@ function Get-Preview([string]$requestTarget) {
 }
 
 try {
+  $listener.Start()
   $running = $true
   while ($true) {
     while (-not $listener.Pending()) {
       $now = Get-Date
-      if (($null -eq $lastHeartbeat -and ($now - $startedAt).TotalMinutes -ge 5) -or
-          ($null -ne $lastHeartbeat -and ($now - $lastHeartbeat).TotalSeconds -ge 30)) {
+      if (($now - $lastActivity).TotalMinutes -ge 5) {
         $listener.Stop()
         $running = $false
         break
@@ -200,9 +200,13 @@ try {
     if (-not $running) { break }
     $client = $listener.AcceptTcpClient()
     try {
+      # ブラウザの先行接続がHTTP要求を送らなくても、後続の要求を塞がない。
+      $client.ReceiveTimeout = 1000
+      $client.SendTimeout = 5000
       $stream = $client.GetStream()
       $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8, $false, 4096, $true)
       $requestLine = $reader.ReadLine()
+      $client.ReceiveTimeout = 5000
       $parts = $requestLine -split ' '
       $method = $parts[0]; $path = Select-ReportData $parts[1]
       $contentLength = 0
@@ -224,6 +228,9 @@ try {
         $requestBody = -join $chars
       }
       switch ($path) {
+        '/api/health' {
+          Send-Response $client 204 'text/plain; charset=utf-8' ''
+        }
         '/' {
           Send-Response $client 200 'text/html; charset=utf-8' (Read-ReportHtml)
         }
@@ -231,7 +238,6 @@ try {
           Send-Response $client 200 'text/css; charset=utf-8' (Get-Content -LiteralPath $bulmaPath -Raw -Encoding UTF8)
         }
         '/api/heartbeat' {
-          $lastHeartbeat = Get-Date
           Send-Response $client 204 'text/plain; charset=utf-8' ''
         }
         '/api/preview' {
@@ -251,11 +257,21 @@ try {
         default { Send-Response $client 404 'text/plain; charset=utf-8' 'Not Found' }
       }
     } catch {
-      Send-Response $client 400 'application/json; charset=utf-8' ('{"ok":false,"error":' + ($_.Exception.Message | ConvertTo-Json -Compress) + '}')
+      try {
+        Send-Response $client 400 'application/json; charset=utf-8' ('{"ok":false,"error":' + ($_.Exception.Message | ConvertTo-Json -Compress) + '}')
+      } catch {
+        # ブラウザが接続を閉じてもサーバ全体は終了させない。
+      }
     } finally {
       $client.Close()
+      $lastActivity = Get-Date
     }
   }
+} catch {
+  if (-not [string]::IsNullOrWhiteSpace($ErrorLogPath)) {
+    Add-Content -LiteralPath $ErrorLogPath -Encoding UTF8 -Value ("{0} {1}" -f (Get-Date -Format 'o'), $_.Exception.ToString())
+  }
+  exit 1
 } finally {
   $previewCache.Clear()
   $listener.Stop()
