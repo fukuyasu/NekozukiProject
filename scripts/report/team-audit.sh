@@ -7,7 +7,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "$REPO_ROOT"
 
 usage() {
-  echo "使い方: bash scripts/report/team-audit.sh --milestone lec06 [--milestone lec07 ...] [--output 出力先.html]" >&2
+  echo "使い方: bash scripts/report/team-audit.sh --milestone lec06 [--milestone lec07 ...] [--output ベース名.html]" >&2
 }
 
 MILESTONES=()
@@ -116,7 +116,18 @@ if [[ -n "$SINCE" ]]; then
 fi
 jq -s '.' "$TEMP_DIR/main-commits.jsonl" > "$TEMP_DIR/main-commits.json"
 
-GENERATED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+GENERATED_EPOCH="$(date -u '+%s')"
+GENERATED_AT="$(date -u -d "@${GENERATED_EPOCH}" '+%Y-%m-%dT%H:%M:%SZ')"
+FILE_STAMP="$(date -u -d "@$((GENERATED_EPOCH + 9 * 3600))" '+%Y-%m-%d_%H%M')"
+MILESTONE_TAG="$(jq -r 'join("-")' "$TEMP_DIR/milestones.json")"
+OUTPUT_DIR="$(dirname "$OUTPUT")"
+OUTPUT_STEM="$(basename "$OUTPUT" .html)"
+OUTPUT="${OUTPUT_DIR}/${OUTPUT_STEM}_${FILE_STAMP}_${MILESTONE_TAG}.html"
+SUFFIX=2
+while [[ -e "$OUTPUT" ]]; do
+  OUTPUT="${OUTPUT_DIR}/${OUTPUT_STEM}_${SUFFIX}_${FILE_STAMP}_${MILESTONE_TAG}.html"
+  SUFFIX=$((SUFFIX + 1))
+done
 jq -n --arg repository "$REPOSITORY" --arg generatedAt "$GENERATED_AT" --arg since "$SINCE" \
   --slurpfile milestones "$TEMP_DIR/milestones.json" --slurpfile members "$TEMP_DIR/members.json" \
   --slurpfile issues "$TEMP_DIR/issue-details.json" --slurpfile prs "$TEMP_DIR/pr-details.json" \
@@ -136,10 +147,12 @@ cat > "$HTML_TEMP" <<'HTML'
 </style></head><body><header><h1>チーム開発確認</h1><div id="meta"></div></header><main class="wrap">
 <section><label for="filter">表示対象</label><select id="filter"></select><p class="muted">「すべて」は指定したMilestoneと未設定を各1件ずつ含みます。数値や記録を根拠に教員が確認してください。</p></section>
 <section><h2>メンバー別件数</h2><div class="scroll" id="members"></div></section>
-<section><h2>所要時間</h2><p class="muted">Issueは作成→Close、PRは作成→マージ（未マージでClose済みならClose）です。Openな項目は生成日時までの経過時間です。</p><div class="scroll" id="durations"></div></section>
-<section><h2>Issue</h2><div class="scroll" id="issues"></div></section>
-<section><h2>Pull Request</h2><div class="scroll" id="prs"></div></section>
+<section><h2>所要時間（Close済み）</h2><p class="muted">Issueは作成→Close、PRは作成→マージ（未マージでClose済みならClose）です。</p><div class="scroll" id="durations"></div></section>
+<section><h2>Issue（Close済み）</h2><div class="scroll" id="issues"></div></section>
+<section><h2>Pull Request（Close済み）</h2><div class="scroll" id="prs"></div></section>
 <section><h2>mainのコミット履歴</h2><p class="muted" id="history-note"></p><div class="scroll" id="commits"></div></section>
+<section><h2>未CloseのIssue</h2><div class="scroll" id="open-issues"></div></section>
+<section><h2>未CloseのPull Request</h2><div class="scroll" id="open-prs"></div></section>
 <aside id="preview" class="preview" role="tooltip" hidden></aside>
 </main><script id="audit-data" type="application/json">
 HTML

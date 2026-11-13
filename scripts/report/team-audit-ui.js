@@ -6,8 +6,8 @@
   const prMap = new Map(data.prs.map(item => [item.number, item]));
   const commitMap = new Map(data.mainCommits.map(item => [item.sha, item]));
   const allIssueNumbers = new Set(data.allIssueNumbers);
-  const generatedTime = Date.parse(data.generatedAt);
   let visibleIssues = [], visiblePrs = [];
+  let closedIssues = [], closedPrs = [], openIssues = [], openPrs = [];
 
   function el(tag, text, className) {
     const node = document.createElement(tag);
@@ -96,21 +96,43 @@
     details.append(el('summary', '本文を表示'), el('div', body || '本文なし', 'body'));
     return details;
   }
+  function acStatus(issue) {
+    const body = issue.body || '';
+    const heading = /^#{2,3}\s*AC(?:（受け入れ基準）)?\s*$/im.exec(body);
+    if (!heading) return 'なし';
+    const content = body.slice(heading.index + heading[0].length).split(/^#{1,3}\s+/m)[0].trim();
+    return content ? 'あり' : 'なし';
+  }
+  function relatedPrNumbers(issue) {
+    return visiblePrs.filter(pr => relatedNumbers(pr).includes(issue.number)).map(pr => pr.number);
+  }
+  function reviewHistory(pr) {
+    const reviews = el('div');
+    (pr.reviews || []).forEach((review, index) => {
+      if (index) reviews.append(el('br'));
+      reviews.append(`${review.user || '不明'}: ${review.state} (${date(review.submitted_at)})`);
+    });
+    if (!pr.reviews?.length) reviews.textContent = '—';
+    return reviews;
+  }
+  function branchText(pr) {
+    return `${pr.head?.ref || '不明'} → ${pr.base?.ref || '不明'}`;
+  }
   function renderMembers() {
     const rows = data.members.map(member => {
-      const assignedIssues = visibleIssues.filter(issue => assignees(issue).includes(member));
-      const ownedPrs = visiblePrs.filter(pr => owner(pr) === member);
+      const assignedIssues = closedIssues.filter(issue => assignees(issue).includes(member));
+      const ownedPrs = closedPrs.filter(pr => owner(pr) === member);
       const linkedPrs = ownedPrs.filter(pr => relatedNumbers(pr).length > 0);
-      const reviewedPrs = visiblePrs.filter(pr => owner(pr) !== member && pr.reviews.some(review => review.user === member && review.submitted_at));
-      const mergedPrs = visiblePrs.filter(pr => owner(pr) !== member && pr.mergedBy === member);
+      const reviewedPrs = closedPrs.filter(pr => owner(pr) !== member && pr.reviews.some(review => review.user === member && review.submitted_at));
+      const mergedPrs = closedPrs.filter(pr => owner(pr) !== member && pr.mergedBy === member);
       return [member, assignedIssues.length, ownedPrs.length, linkedPrs.length, reviewedPrs.length, mergedPrs.length];
     });
     $('members').replaceChildren(table(['メンバー', '担当Issue', '担当PR', '関連Issueのある担当PR', '他者PRのレビュー', '他者PRのマージ'], rows));
   }
   function renderDurations() {
     const items = [
-      ...visibleIssues.map(item => ({kind: 'issue', item, start: item.created_at, end: item.closed_at || data.generatedAt, endLabel: item.closed_at ? 'Close' : '生成時'})),
-      ...visiblePrs.map(item => ({kind: 'pr', item, start: item.created_at, end: item.merged_at || item.closed_at || data.generatedAt, endLabel: item.merged_at ? 'マージ' : item.closed_at ? 'Close' : '生成時'}))
+      ...closedIssues.map(item => ({kind: 'issue', item, start: item.created_at, end: item.closed_at, endLabel: 'Close'})),
+      ...closedPrs.map(item => ({kind: 'pr', item, start: item.created_at, end: item.merged_at || item.closed_at, endLabel: item.merged_at ? 'マージ' : 'Close'}))
     ];
     items.sort((a, b) => (Date.parse(b.end) - Date.parse(b.start)) - (Date.parse(a.end) - Date.parse(a.start)));
     $('durations').replaceChildren(table(['種類', '項目', '開始（作成）', '終了', '経過時間'], items.map(({kind, item, start, end, endLabel}) => [
@@ -118,22 +140,14 @@
     ])));
   }
   function renderIssues() {
-    const rows = visibleIssues.map(issue => {
-      const prs = visiblePrs.filter(pr => relatedNumbers(pr).includes(issue.number)).map(pr => pr.number);
-      const ac = /(^|\n)#{2,3}\s*AC(?:（受け入れ基準）)?/i.test(issue.body || '') ? '本文にAC見出しあり' : '本文で確認';
+    const rows = closedIssues.map(issue => {
       const body = append(el('div'), detail(issue.body), el('div', `作成: ${date(issue.created_at)} / Close: ${date(issue.closed_at)}`, 'muted'));
-      return [link('issue', issue, `#${issue.number} ${issue.title}`), milestone(issue), assignees(issue).join('、') || '未設定', issue.state, ac, joinedLinks('pr', prs), issue.closed_at ? (issue.closedByPr ? numberLink('pr', issue.closedByPr) : 'PRによるClose記録なし') : '—', body];
+      return [link('issue', issue, `#${issue.number} ${issue.title}`), milestone(issue), assignees(issue).join('、') || '未設定', issue.state, acStatus(issue), joinedLinks('pr', relatedPrNumbers(issue)), issue.closedByPr ? numberLink('pr', issue.closedByPr) : 'PRによるClose記録なし', body];
     });
     $('issues').replaceChildren(table(['Issue', 'Milestone', '担当者', '状態', 'AC', '関連PR', 'Close元', '詳細'], rows));
   }
   function renderPrs() {
-    const rows = visiblePrs.map(pr => {
-      const reviews = el('div');
-      (pr.reviews || []).forEach((review, index) => {
-        if (index) reviews.append(el('br'));
-        reviews.append(`${review.user || '不明'}: ${review.state} (${date(review.submitted_at)})`);
-      });
-      if (!pr.reviews?.length) reviews.textContent = '—';
+    const rows = closedPrs.map(pr => {
       const details = el('div');
       const sections = ['関連Issue', '変更内容', 'AC確認結果', 'テスト結果'];
       for (const name of sections) {
@@ -144,9 +158,25 @@
       const first = pr.firstCommit?.sha ? `最初のコミット ${pr.firstCommit.sha.slice(0, 10)} / 親 ${pr.firstCommit.parents.join('、') || 'なし'}` : '最初のコミットを取得できません';
       details.append(el('div', `base: ${pr.base?.ref || '不明'} / ${first}`, 'muted'));
       details.append(el('div', `作成: ${date(pr.created_at)} / マージ: ${date(pr.merged_at)} / Close: ${date(pr.closed_at)}`, 'muted'));
-      return [link('pr', pr, `#${pr.number} ${pr.title}`), milestone(pr), owner(pr), pr.user?.login || '不明', joinedLinks('issue', relatedNumbers(pr)), reviews, pr.mergedBy || '—', details];
+      return [link('pr', pr, `#${pr.number} ${pr.title}`), milestone(pr), owner(pr), pr.user?.login || '不明', joinedLinks('issue', relatedNumbers(pr)), reviewHistory(pr), pr.mergedBy || '—', details];
     });
     $('prs').replaceChildren(table(['PR', 'Milestone', '担当者', '作成者', '関連Issue', 'レビュー履歴', 'マージ者', '本文・ブランチ'], rows));
+  }
+  function renderOpenIssues() {
+    const rows = openIssues.map(issue => [
+      link('issue', issue, `#${issue.number} ${issue.title}`), milestone(issue),
+      assignees(issue).join('、') || '未設定', acStatus(issue),
+      joinedLinks('pr', relatedPrNumbers(issue)), date(issue.created_at), detail(issue.body)
+    ]);
+    $('open-issues').replaceChildren(table(['Issue・タイトル', 'Milestone', '担当者', 'AC有無', '関連PR', '開始（作成）', '詳細'], rows));
+  }
+  function renderOpenPrs() {
+    const rows = openPrs.map(pr => [
+      link('pr', pr, `#${pr.number} ${pr.title}`), milestone(pr), owner(pr),
+      pr.user?.login || '不明', joinedLinks('issue', relatedNumbers(pr)),
+      reviewHistory(pr), pr.mergedBy || '—', date(pr.created_at), branchText(pr), detail(pr.body)
+    ]);
+    $('open-prs').replaceChildren(table(['PR・タイトル', 'Milestone', '担当者', '作成者', '関連Issue', 'レビュー履歴', 'マージ者', '開始（作成）', 'ブランチ', '本文'], rows));
   }
   function renderCommits() {
     $('history-note').textContent = data.historySince
@@ -175,7 +205,12 @@
     const include = item => selected === 'all' || milestone(item) === selected;
     visibleIssues = data.issues.filter(include);
     visiblePrs = data.prs.filter(include);
+    closedIssues = visibleIssues.filter(issue => issue.closed_at != null);
+    closedPrs = visiblePrs.filter(pr => pr.closed_at != null);
+    openIssues = visibleIssues.filter(issue => issue.closed_at == null);
+    openPrs = visiblePrs.filter(pr => pr.closed_at == null);
     renderMembers(); renderDurations(); renderIssues(); renderPrs(); renderCommits();
+    renderOpenIssues(); renderOpenPrs();
   }
   const select = $('filter');
   [['all', 'すべて（指定Milestone＋未設定）'], ...data.milestones.map(value => [value, value]), ['未設定', '未設定']]
