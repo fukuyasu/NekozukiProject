@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/milestone.sh"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "$REPO_ROOT"
+SUMMARY_STARTED_AT=$SECONDS
 
 # 授業用PortableGitではjq.exeが/usr/local/binに置かれている。
 [[ -x /usr/local/bin/jq.exe ]] && export PATH="/usr/local/bin:${PATH}"
@@ -46,7 +47,7 @@ while (($#)); do
         --milestone) MILESTONE="$2" ;;
       esac
       shift 2 ;;
-    *) echo "使い方: $0 --milestone lec06～lec14 [--student GitHub名]" >&2; exit 2 ;;
+    *) echo "使い方: $0 --milestone lec06～lec14" >&2; exit 2 ;;
   esac
 done
 [[ "$STUDENT" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] || { echo 'エラー: 学生のGitHub名が不正です。' >&2; exit 2; }
@@ -106,7 +107,7 @@ if [[ -n "$multiple_prs" || -n "$multiple_issues" ]]; then
   [[ -z "$multiple_issues" ]] || printf '%s\n' "$multiple_issues" >&2
   [[ -z "$multiple_prs" ]] || printf '%s\n' "$multiple_prs" >&2
   echo 'GitHub上で内容を一番よく理解している主担当のみをassigneeに残してください。' >&2
-  echo "修正後に bash scripts/report/weekly-summary.sh --milestone ${MILESTONE} --student ${STUDENT} を再実行してください。既存のレポートは変更していません。" >&2
+  echo "修正後に bash scripts/report/weekly-summary.sh --milestone ${MILESTONE} を再実行してください。既存のレポートは変更していません。" >&2
   exit 1
 fi
 
@@ -116,7 +117,7 @@ if [[ -n "$missing_prs" || -n "$missing_issues" ]]; then
   echo 'エラー: Milestone未割当のIssue・PRがあります。' >&2
   [[ -z "$missing_issues" ]] || printf '%s\n' "$missing_issues" >&2
   [[ -z "$missing_prs" ]] || printf '%s\n' "$missing_prs" >&2
-  echo "GitHubでMilestoneを設定し、bash scripts/report/weekly-summary.sh --milestone ${MILESTONE} --student ${STUDENT} を再実行してください。既存のレポートは変更していません。" >&2
+  echo "GitHubでMilestoneを設定し、bash scripts/report/weekly-summary.sh --milestone ${MILESTONE} を再実行してください。既存のレポートは変更していません。" >&2
   exit 1
 fi
 
@@ -181,7 +182,7 @@ while IFS= read -r pr_number; do
   issue_created_fallback=''
   first_issue_number="$(jq -r '.[0] // empty' <<<"$closed_issue_numbers")"
   if [[ -n "$first_issue_number" ]]; then
-    if ! issue_created_fallback="$(gh issue view "$first_issue_number" --repo "$REPOSITORY" --json createdAt --jq .createdAt 2>/dev/null)"; then
+    if ! issue_created_fallback="$(jq -er --argjson number "$first_issue_number" '.[] | select(.number == $number) | .created_at' "$TEMP_DIR/all-issues.json")"; then
       echo "エラー: Issue #${first_issue_number} の作成日時を取得できません。既存のレポートは変更せず終了します。" >&2
       exit 1
     fi
@@ -206,7 +207,7 @@ while IFS= read -r pr_number; do
   fi
   [[ -n "$merged_at" ]] || continue
   while IFS= read -r issue_number; do
-    if ! issue="$(gh issue view "$issue_number" --repo "$REPOSITORY" --json number,title,url,body,createdAt,closedAt,assignees,milestone 2>/dev/null)"; then
+    if ! issue="$(jq -e --argjson number "$issue_number" '.[] | select(.number == $number) | {number,title,url:.html_url,body,createdAt:.created_at,closedAt:.closed_at,assignees,milestone}' "$TEMP_DIR/all-issues.json")"; then
       echo "エラー: Issue #${issue_number} の詳細を取得できません。既存のレポートは変更せず終了します。" >&2
       exit 1
     fi
@@ -395,7 +396,7 @@ details summary{cursor:pointer;color:var(--text)}
 <div id="details"></div>
 <div id="unfinished"></div>
 <aside id="github-preview" class="github-preview" role="tooltip" hidden></aside>
-<p class="footer-note">AI利用とDoDの回答は表示中のJSONへ保存されます。ページを閉じると、約30秒後にローカルサーバは終了します。</p>
+<p class="footer-note">AI利用とDoDの回答は表示中のJSONへ保存されます。最後の通信から約5分後にローカルサーバは終了します。</p>
 </div></main>
 <script>const report=
 EOF
@@ -403,9 +404,7 @@ printf '%s' "$REPORT_JSON" >> "$REPORT_FILE"
 printf ';/*WEEKLY_SUMMARY_DATA_END*/' >> "$REPORT_FILE"
 cat "${SCRIPT_DIR}/weekly-summary-ui.js" >> "$REPORT_FILE"
 printf '\n</script></body></html>\n' >> "$REPORT_FILE"
-PORT="$((18000 + RANDOM % 1000))"
 echo "作成しました: $DATA_FILE"
 echo "表示します: $REPORT_FILE"
-"$POWERSHELL_EXE" -NoProfile -ExecutionPolicy Bypass -File "${SCRIPT_DIR}/server-weekly-summary.ps1" -HtmlPath "$(pwd -W)/${REPORT_FILE}" -DataPath "$(pwd -W)/${DATA_FILE}" -GhPath "$(cygpath -w "$(command -v gh)")" -Port "$PORT" >/dev/null 2>&1 &
-sleep 1
-"$POWERSHELL_EXE" -NoProfile -Command "Start-Process 'http://127.0.0.1:${PORT}/'" >/dev/null 2>&1 || true
+echo "集計・HTML生成: $((SECONDS - SUMMARY_STARTED_AT)) 秒"
+"$POWERSHELL_EXE" -NoProfile -ExecutionPolicy Bypass -File "${SCRIPT_DIR}/start-weekly-summary.ps1" -HtmlPath "$(pwd -W)/${REPORT_FILE}" -DataPath "$(pwd -W)/${DATA_FILE}" -GhPath "$(cygpath -w "$(command -v gh)")"

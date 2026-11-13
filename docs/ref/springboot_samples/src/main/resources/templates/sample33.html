@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.springframework.org/schema/security">
+
+<head>
+  <meta charset="utf-8">
+  <title>SpringBoot Sample3-3</title>
+</head>
+
+<body>
+  <div><a href="/logout">ログアウト</a></div>
+
+  <h2>ユーザ名とロール名の表示(Sample3-4)</h2>
+  java上でPrinciplesから値を取得する方法ではなく，thymeleaf-extras-springsecurityプラグインを利用してhtmlから直接ユーザ名やPrinciples（ロール情報）を取得する方法を試す．
+  <!--sec:authenticationで認証情報にアクセスできる．nameはユーザ名を表す-->
+  <h3>ユーザ名：<div sec:authentication="name"></div>
+  </h3>
+  <!--sec:authenticationで認証情報にアクセスできる．principal.authoritiesはロール名を表す-->
+  <h3>ロール名：<div sec:authentication="principal.authorities"></div>
+  </h3>
+  <h2>ロールごとの表示情報の切り分け(Sample3-5)</h2>
+  hasRoleを使うと，そのタグをログインユーザのロールごとに表示する/しないを切り分けることができる
+  <div sec:authorize="hasRole('ROLE_ADMIN')">
+    <span>あなたは管理者ですね</span>
+  </div>
+
+  <div sec:authorize="hasRole('ROLE_USER')">
+    <div>あなたはユーザですね．</div>
+  </div>
+  <div>引き算を実行しましょう(Sample3-6)．</div>
+  <!--
+      認証処理を伴う場合はform action=ではなく，thを使ったthymeleafの記述を利用する必要がある(CSRF対応のため)
+    -->
+  <form th:action="@{/sample3/step6}" method="post">
+    <input type="number" name="hiku1" />-
+    <input type="number" name="hiku2" />
+    <input type="submit" value="計算"><input type="reset" value="リセット">
+  </form>
+  <div th:if="${hikukekka}">
+    結果：[[${hikukekka}]]
+  </div>
+  </div>
+
+
+  <p>
+    <a href=" /sample3/step7">Sample3-7へGETで移動</a>
+  </p>
+
+
+</body>
+
+</html>

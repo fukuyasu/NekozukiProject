@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <title>SpringBoot Sample2-6</title>
+</head>
+
+<body>
+  <!--
+        th:inline="javascript" と書くことで，javascriptコード中にthymeleafを利用して変数をJavaから受け取ることができるようになる
+        表示の際にはdocument.getElementByIdのようなDOM操作のAPIを利用し，値を表示する
+        今回の場合 #num_list というIDを利用して操作している
+        javascriptのDOM操作については適宜検索してみること
+      -->
+  <script th:inline="javascript" th:if=${score}>
+    window.onload = function () {
+      //score変数の内容を読み取る
+      var score = [[${ score }]];
+      //3つの数値を文字列として保持する変数
+      var num_list_txt = "";
+      for (let i = 0; i < 3; i++) {
+        num_list_txt = num_list_txt + score.numList[i] + ",";
+      }
+      num_list_txt = num_list_txt + "<br>平均は" + score.ave;
+      //DOM操作
+      document.getElementById("num_list").innerHTML = num_list_txt;
+      console.log(score);//ログ出力．ブラウザのコンソール画面に表示される
+    }
+  </script>
+  <h1>Hello ArrayList and JavaScript!</h1>
+  複数の値を処理してみよう
+  <p>
+    数字を2つ入れてみよう
+  <form action="/sample26" method="post">
+    最小値：<input type="number" name="min" />
+    最大値：<input type="number" name="max" />
+    <input type="submit" value="計算"><input type="reset" value="リセット">
+  </form>
+
+  <div>
+    以下の数字をすべて加算すると(Thymeleafのfor-each)<br>
+    <!-- sumRangeに配列として数値が入っている
+        for each文としてすべての数値を表示する-->
+    <span th:each="num:${sumRange}">
+      [[${num}]]
+    </span>
+    <div>
+      [[${sum}]]
+    </div>
+  </div>
+  </p>
+
+  <p>
+    数字を3つ入れてみよう
+    <!-- /sample26/ave にpostでアクセスするフォーム-->
+  <form action="/sample26/ave" method="post">
+    <input type="number" name="num1" />
+    <input type="number" name="num2" />
+    <input type="number" name="num3" />
+    <input type="submit" value="計算"><input type="reset" value="リセット">
+  </form>
+  </p>
+
+  <!--score変数が渡された場合のみdivタグの中身を表示する-->
+  <div th:if="${score}">
+    <span id="num_list">
+      ほげほげ
+    </span>
+  </div>
+</body>
+
+</html>

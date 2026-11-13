@@ -535,8 +535,8 @@ Skill は「期待結果／実際の結果／再現手順／原因候補／候�
 # ログイン中の学生について，lec06に属するIssue・PRを集計する
 bash scripts/report/weekly-summary.sh --milestone lec06
 
-# 対象学生を指定する
-bash scripts/report/weekly-summary.sh --milestone lec07 --student fukuyasu
+# 別のMilestoneを集計する
+bash scripts/report/weekly-summary.sh --milestone lec07
 ```
 
 `--milestone` は必須で，`lec06`～`lec14` のGitHub上に存在するMilestoneを指定します．
@@ -553,9 +553,9 @@ PR・Issue・コミットの取得に失敗した場合も集計を停止し，�
 
 対象学生ごとに `docs/weekly-summary_<GitHubユーザー名>.html` と `docs/weekly-summary-data/<ユーザー名>/lecXX.json` ができ，ブラウザで開きます．同じMilestoneを再集計すると，既存JSONを `lecXX.backup-YYYY-MM-DD_HHMMSS.json.bak` に保存してから新しいJSONに差し替えます．**HTML は閲覧用，JSON が進捗の正本**です．個人のローカル記録で Git 管理しません．
 
-`--student` を省略すると現在ログイン中のGitHubユーザーを対象にします．日時による絞り込みは行いません．担当PRは，assigneeが設定されていれば自分がassigneeであるPR，未設定なら自分が作成したPRです．前回入力したAI利用は同じClose済み担当PRについて引き継ぎ，DoD自己評価は対象Issue・PRの集合が変わらない場合に引き継ぎます．以前の形式のJSONから回答は引き継ぎません．
+現在ログイン中のGitHubユーザーを対象にします．日時による絞り込みは行いません．担当PRは，assigneeが設定されていれば自分がassigneeであるPR，未設定なら自分が作成したPRです．前回入力したAI利用は同じClose済み担当PRについて引き継ぎ，DoD自己評価は対象Issue・PRの集合が変わらない場合に引き継ぎます．以前の形式のJSONから回答は引き継ぎません．
 
-ページ上部の「表示する記録」でMilestone別の JSON を切り替えられます．全体概要の「概要をコピー」は，Googleスプレッドシートに貼り付けられるタブ区切りテキストをコピーします．学生ごとに1つのスプレッドシートを用意し，lec06から順に最終行の下へ貼り付けてください．各Milestoneの先頭に9つの数値集計行，次にPR・Issueの明細，最後に独立したDoD自己評価6行が入ります．明細の「所要時間」列は「作成日時」の直前にあり，算定できたClose済み担当PRに表示します．行種別「集計」とMilestoneで絞り込めるため，明細の行数が変わっても件数を分析できます．同じMilestoneを再集計して貼り直す場合は，古いMilestoneの行を削除してから貼り付けてください．全体概要ではOpen PR・Open Issueの件数をtrouble reportの後に表示します．Close済み担当PRの下には関連Issueと現在のOpen／Closedを表示し，所要時間には「ブランチ作成からマージまで」のように算定範囲も併記します．ブランチ作成日時が取得できない場合は，最初のコミット，Issue作成，PR作成の順に開始日時を選びます．未マージのPRはClose日時を終了日時とします．DoD自己評価とClose済み担当PRごとのAI利用は，選択内容が表示中の JSON に保存されます．未完了エリアにはMilestoneや担当者を問わず全Open PR・Issueを表示します．コミットは自分が作成した対象MilestoneのPRのもの，コメントは対象Issue・PRに付いたものを集計します．Milestoneに紐付かないローカルのtrouble reportは集計対象外です．ページを閉じるとローカルサーバは約 30 秒後に終了します．
+ページ上部の「表示する記録」でMilestone別の JSON を切り替えられます．全体概要の「概要をコピー」は，Googleスプレッドシートに貼り付けられるタブ区切りテキストをコピーします．学生ごとに1つのスプレッドシートを用意し，lec06から順に最終行の下へ貼り付けてください．各Milestoneの先頭に9つの数値集計行，次にPR・Issueの明細，最後に独立したDoD自己評価6行が入ります．明細の「所要時間」列は「作成日時」の直前にあり，算定できたClose済み担当PRに表示します．行種別「集計」とMilestoneで絞り込めるため，明細の行数が変わっても件数を分析できます．同じMilestoneを再集計して貼り直す場合は，古いMilestoneの行を削除してから貼り付けてください．全体概要ではOpen PR・Open Issueの件数をtrouble reportの後に表示します．Close済み担当PRの下には関連Issueと現在のOpen／Closedを表示し，所要時間には「ブランチ作成からマージまで」のように算定範囲も併記します．ブランチ作成日時が取得できない場合は，最初のコミット，Issue作成，PR作成の順に開始日時を選びます．未マージのPRはClose日時を終了日時とします．DoD自己評価とClose済み担当PRごとのAI利用は，選択内容が表示中の JSON に保存されます．未完了エリアにはMilestoneや担当者を問わず全Open PR・Issueを表示します．コミットは自分が作成した対象MilestoneのPRのもの，コメントは対象Issue・PRに付いたものを集計します．Milestoneに紐付かないローカルのtrouble reportは集計対象外です．最後の通信から約 5 分後にローカルサーバは終了します．新しい週次レポートサーバを起動すると，前のサーバは終了します．
 
 詳細表示はClose済み担当PR，自分がマージしたPR，手動でCloseされたIssue，コミット，GitHubコメント，trouble reportの順です．PR・Issueには主担当，作成者，作成日時など，コピーする明細と同じ項目を表示し，関連Issueにも作成者や日時を表示します．ページ末尾の未完了エリアでは，全Open PR・Issueの担当者，作成者，作成日時，関連Issue・PRを確認できます．
 

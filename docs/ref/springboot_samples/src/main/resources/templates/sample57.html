@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.springframework.org/schema/security">
+
+<head>
+  <meta charset="utf-8">
+  <title>SpringBoot Sample5-7</title>
+  <script>
+    window.onload = function () {
+      var sse = new EventSource('/sample5/step9');
+      sse.onmessage = function (event) {
+        console.log("sse.onmessage")
+        console.log(event.data);
+        var fruits_list = JSON.parse(event.data);//JSONオブジェクトとしてparse
+        var fruits_table = "";
+        // DBに残っているフルーツのリストがJSONオブジェクトとして得られるので，htmlを作成し，tbodyの中身毎入れ替える
+        for (var i = 0; i < fruits_list.length; i++) {
+          var bgn_tr = "<tr>";
+          var end_tr = "</tr>";
+          var idx = "<td>" + i + "</td>";
+          var f_name = "<td>" + fruits_list[i].name + "</td>";
+          var f_price = "<td>" + fruits_list[i].price + "</td>";
+          var f_proc = "<td>" + "<a href='/sample5/step8?id=" + fruits_list[i].id + "'>購入</a>" + "</td>"
+          fruits_table = fruits_table + bgn_tr + idx + f_name + f_price + f_proc + end_tr;
+
+        }
+        console.log(fruits_table);
+        var tbody = document.getElementById("fruits_list");
+        tbody.innerHTML = fruits_table;//idがfruits_listのtbodyのHTMLを差し替える
+
+      }
+    }
+  </script>
+</head>
+
+<body>
+  <h1>Authorized! <span sec:authentication="name"></span>
+  </h1>
+  <a href="/logout">ログアウト</a>
+
+  <h2>Online Fruits Shop</h2>
+
+  <div>
+    <table border="1">
+      <thead>
+        <th>Index</th>
+        <th>果物</th>
+        <th>金額</th>
+        <th>処理</th>
+      </thead>
+      <tbody id="fruits_list">
+        <span th:if="${fruits7}">
+          <!--クエリパラメータでIDを渡して購入処理を実行する-->
+          <tr th:each="fruit,stat:${fruits7}">
+            <td>[[${stat.index}]]</td>
+            <td>[[${fruit.name}]]</td>
+            <td>[[${fruit.price}]]</td>
+            <td><a th:href="@{/sample5/step8(id=${fruit.id})}">購入</a></td>
+          </tr>
+        </span>
+      </tbody>
+    </table>
+  </div>
+  <div th:if="${fruit8}">
+    [[${fruit8.name}]]を[[${fruit8.price}]]円で購入しました
+  </div>
+
+</body>
+
+</html>

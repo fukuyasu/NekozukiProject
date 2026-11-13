@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.springframework.org/schema/security">
+
+<head>
+  <meta charset="utf-8">
+  <title>SpringBoot Sample4-5</title>
+</head>
+
+<body>
+  <h1>Authorized! <span sec:authentication="name"></span>
+  </h1>
+  <a href="/logout">ログアウト</a>
+
+  <h2>Online Chamber</h2>
+
+  小屋名を入力してください．その小屋に入室したユーザの一覧を表示します
+  <form th:action="@{/sample4/step5}" method="post">
+    <input type="text" name="chamberName" />
+    <input type="submit" value="選択"><input type="reset" value="リセット">
+  </form>
+  <p th:if="${chambers5}">
+    <!--statはステータス変数
+      https://www.ne.jp/asahi/hishidama/home/tech/java/spring/boot/thymeleaf/th_each.html
+    -->
+  <div th:each="chamber,stat:${chambers5}">
+    <tr>
+      <td>Index:[[${stat.index}]]</td>
+      <td>ID:[[${chamber.id}]]</td>
+      <td>ユーザ名:[[${chamber.userName}]]</td>
+      <td>小屋名:[[${chamber.chamberName}]]</td>
+    </tr>
+  </div>
+  </p>
+
+
+  <p>
+    <a href="/sample4/step6">Sample4-6へGETで移動</a>
+  </p>
+
+
+</body>
+
+</html>

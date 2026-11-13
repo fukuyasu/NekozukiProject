@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.springframework.org/schema/security">
+
+<head>
+  <meta charset="utf-8">
+  <title>SpringBoot Sample4-3</title>
+</head>
+
+<body>
+  <h1>Authorized! <span sec:authentication="name"></span>
+  </h1>
+  <a href="/logout">ログアウト</a>
+
+  <h2>Online Chamber</h2>
+
+  入室する小屋名を入力してください
+  <form th:action="@{/sample4/step3}" method="post">
+    <input type="text" name="chamberName" />
+    <input type="submit" value="入室"><input type="reset" value="リセット">
+  </form>
+  <p th:if="${chamber3}">
+    小屋名:[[${chamber3.chamberName}]]
+    ユーザ名:[[${chamber3.userName}]]
+  </p>
+
+
+  <p>
+    <a href="/sample4/step5">Sample4-5へGETで移動</a>
+  </p>
+
+
+</body>
+
+</html>
