@@ -118,16 +118,112 @@
   function branchText(pr) {
     return `${pr.head?.ref || '不明'} → ${pr.base?.ref || '不明'}`;
   }
+  function memberCounts(member) {
+    const ownedPrs = closedPrs.filter(pr => owner(pr) === member);
+    return {
+      assignedIssues: closedIssues.filter(issue => assignees(issue).includes(member)).length,
+      ownedPrs: ownedPrs.length,
+      linkedPrs: ownedPrs.filter(pr => relatedNumbers(pr).length > 0).length,
+      reviewedPrs: closedPrs.filter(pr => owner(pr) !== member && pr.reviews.some(review => review.user === member && review.submitted_at)).length,
+      mergedPrs: closedPrs.filter(pr => owner(pr) !== member && pr.mergedBy === member).length
+    };
+  }
   function renderMembers() {
     const rows = data.members.map(member => {
-      const assignedIssues = closedIssues.filter(issue => assignees(issue).includes(member));
-      const ownedPrs = closedPrs.filter(pr => owner(pr) === member);
-      const linkedPrs = ownedPrs.filter(pr => relatedNumbers(pr).length > 0);
-      const reviewedPrs = closedPrs.filter(pr => owner(pr) !== member && pr.reviews.some(review => review.user === member && review.submitted_at));
-      const mergedPrs = closedPrs.filter(pr => owner(pr) !== member && pr.mergedBy === member);
-      return [member, assignedIssues.length, ownedPrs.length, linkedPrs.length, reviewedPrs.length, mergedPrs.length];
+      const counts = memberCounts(member);
+      return [member, counts.assignedIssues, counts.ownedPrs, counts.linkedPrs, counts.reviewedPrs, counts.mergedPrs];
     });
     $('members').replaceChildren(table(['メンバー', '担当Issue', '担当PR', '関連Issueのある担当PR', '他者PRのレビュー', '他者PRのマージ'], rows));
+  }
+  function spreadsheetCell(value) {
+    const cleaned = String(value ?? '').replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').trim();
+    return /^[=+\-@]/.test(cleaned) ? `'${cleaned}` : cleaned;
+  }
+  function spreadsheetDate(value) {
+    if (!value) return '';
+    const timestamp = Date.parse(value);
+    if (!Number.isFinite(timestamp)) return '';
+    const jst = new Date(timestamp + 9 * 60 * 60 * 1000);
+    const two = n => String(n).padStart(2, '0');
+    return `${jst.getUTCFullYear()}/${two(jst.getUTCMonth() + 1)}/${two(jst.getUTCDate())} ${two(jst.getUTCHours())}:${two(jst.getUTCMinutes())}`;
+  }
+  function spreadsheetDuration(start, end) {
+    const minutes = Math.floor((Date.parse(end) - Date.parse(start)) / 60000);
+    if (!Number.isFinite(minutes) || minutes < 0) return '';
+    return `${Math.floor(minutes / 1440)}日 ${Math.floor(minutes % 1440 / 60)}時間 ${minutes % 60}分`;
+  }
+  function spreadsheetTsv() {
+    const scope = $('filter').value === 'all' ? `${data.milestones.join('・')}＋未設定` : $('filter').value;
+    const lines = [];
+    const add = values => lines.push(values.map(spreadsheetCell).join('\t'));
+    const startTable = (title, headers) => {
+      if (lines.length) lines.push('');
+      add([`${title}（${scope}）`]);
+      add(headers);
+    };
+
+    startTable('集計', ['区分', 'メンバー', 'Issue数', 'PR数', '関連IssueありPR', '他者レビュー', '他者マージ']);
+    for (const member of data.members) {
+      const counts = memberCounts(member);
+      add(['メンバー（Close済み）', member, counts.assignedIssues, counts.ownedPrs,
+        counts.linkedPrs, counts.reviewedPrs, counts.mergedPrs]);
+    }
+    add(['全体（Close済み）', '', closedIssues.length, closedPrs.length, '', '', '']);
+    add(['全体（未Close）', '', openIssues.length, openPrs.length, '', '', '']);
+
+    startTable('PR', ['番号', '状態', 'Milestone', 'タイトル', 'GitHub URL', '担当者', '作成者',
+      '作成日時（日本時間）', '終了日時（日本時間）', 'マージ者', '所要時間', '関連Issue',
+      'レビュー履歴', 'ブランチ', '変更内容有無', 'AC確認結果有無']);
+    for (const pr of [...closedPrs, ...openPrs]) {
+      const state = pr.merged_at ? 'マージ済み' : pr.closed_at ? 'Close済み・未マージ' : '未Close';
+      const reviews = (pr.reviews || []).map(review => `${review.user || '不明'} ${review.state} ${spreadsheetDate(review.submitted_at)}`).join('；');
+      add([pr.number, state, milestone(pr), pr.title, pr.html_url, owner(pr), pr.user?.login,
+        spreadsheetDate(pr.created_at), spreadsheetDate(pr.merged_at || pr.closed_at), pr.mergedBy,
+        pr.closed_at ? spreadsheetDuration(pr.created_at, pr.merged_at || pr.closed_at) : '',
+        relatedNumbers(pr).map(number => `Issue #${number}`).join('、'), reviews,
+        branchText(pr), sectionText(pr.body, '変更内容') ? 'あり' : 'なし',
+        sectionText(pr.body, 'AC確認結果') ? 'あり' : 'なし']);
+    }
+
+    startTable('Issue', ['番号', '状態', 'Milestone', 'タイトル', 'GitHub URL', '担当者', '作成者',
+      '作成日時（日本時間）', 'Close日時（日本時間）', '所要時間', '関連PR', 'Close元PR', 'AC有無']);
+    for (const issue of [...closedIssues, ...openIssues]) {
+      add([issue.number, issue.closed_at ? 'Close済み' : '未Close', milestone(issue),
+        issue.title, issue.html_url, assignees(issue).join('、') || '未設定', issue.user?.login,
+        spreadsheetDate(issue.created_at), spreadsheetDate(issue.closed_at),
+        issue.closed_at ? spreadsheetDuration(issue.created_at, issue.closed_at) : '',
+        relatedPrNumbers(issue).map(number => `PR #${number}`).join('、'),
+        issue.closedByPr ? `PR #${issue.closedByPr}` : '', acStatus(issue)]);
+    }
+    return lines.join('\n');
+  }
+  async function copyOverview() {
+    const value = spreadsheetTsv();
+    const status = $('copy-status');
+    const fallback = $('copy-fallback');
+    fallback.hidden = true;
+    fallback.value = '';
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+      await navigator.clipboard.writeText(value);
+      status.textContent = 'タブ区切りの概要をコピーしました。';
+      return;
+    } catch (_) {
+      fallback.value = value;
+      fallback.hidden = false;
+      fallback.focus();
+      fallback.select();
+      try {
+        if (document.execCommand?.('copy')) {
+          fallback.hidden = true;
+          status.textContent = 'タブ区切りの概要をコピーしました。';
+          return;
+        }
+      } catch (_) { /* 手動コピーへ進む */ }
+      status.textContent = '自動コピーできませんでした。表示されたデータを選択してコピーしてください。';
+      fallback.focus();
+      fallback.select();
+    }
   }
   function renderDurations() {
     const items = [
@@ -215,7 +311,12 @@
   const select = $('filter');
   [['all', 'すべて（指定Milestone＋未設定）'], ...data.milestones.map(value => [value, value]), ['未設定', '未設定']]
     .forEach(([value, label]) => { const option = el('option', label); option.value = value; select.append(option); });
-  select.addEventListener('change', render);
+  select.addEventListener('change', () => {
+    $('copy-status').textContent = '';
+    $('copy-fallback').hidden = true;
+    render();
+  });
+  $('copy-button').addEventListener('click', copyOverview);
   $('meta').textContent = `${data.repository} · 生成: ${date(data.generatedAt)} · 対象: ${data.milestones.join('、')}`;
 
   const preview = $('preview');
