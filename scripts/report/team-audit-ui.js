@@ -6,14 +6,17 @@
   const prMap = new Map(data.prs.map(item => [item.number, item]));
   const commitMap = new Map(data.mainCommits.map(item => [item.sha, item]));
   const allIssueNumbers = new Set(data.allIssueNumbers);
-  const generatedTime = Date.parse(data.generatedAt);
   let visibleIssues = [], visiblePrs = [];
+  let closedIssues = [], closedPrs = [], openIssues = [], openPrs = [];
 
   function el(tag, text, className) {
     const node = document.createElement(tag);
     if (text != null) node.textContent = String(text);
     if (className) node.className = className;
     return node;
+  }
+  function highlightMissing(value) {
+    return value === '未設定' || value === 'なし' ? el('strong', value, 'missing') : value;
   }
   function append(parent, ...children) {
     for (const child of children) parent.append(child);
@@ -26,12 +29,6 @@
       timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit'
     }).format(time) : value;
-  }
-  function elapsed(start, end) {
-    const ms = Date.parse(end) - Date.parse(start);
-    if (!Number.isFinite(ms) || ms < 0) return '算出不可';
-    const hours = Math.floor(ms / 3600000);
-    return `${Math.floor(hours / 24)}日 ${hours % 24}時間`;
   }
   function milestone(item) { return item.milestone?.title || '未設定'; }
   function assignees(item) { return (item.assignees || []).map(user => user.login).filter(Boolean); }
@@ -78,13 +75,13 @@
     t.append(body);
     return t;
   }
-  function joinedLinks(kind, numbers) {
+  function joinedLinks(kind, numbers, emptyLabel = '—') {
     const span = el('span');
     numbers.forEach((number, index) => {
       if (index) span.append('、');
       span.append(numberLink(kind, number));
     });
-    if (!numbers.length) span.textContent = '—';
+    if (!numbers.length) span.append(highlightMissing(emptyLabel));
     return span;
   }
   function sectionText(body, title) {
@@ -96,57 +93,180 @@
     details.append(el('summary', '本文を表示'), el('div', body || '本文なし', 'body'));
     return details;
   }
+  function acStatus(issue) {
+    const body = issue.body || '';
+    const heading = /^#{2,3}\s*AC(?:（受け入れ基準）)?\s*$/im.exec(body);
+    if (!heading) return 'なし';
+    const content = body.slice(heading.index + heading[0].length).split(/^#{1,3}\s+/m)[0].trim();
+    return content ? 'あり' : 'なし';
+  }
+  function relatedPrNumbers(issue) {
+    return visiblePrs.filter(pr => relatedNumbers(pr).includes(issue.number)).map(pr => pr.number);
+  }
+  function reviewHistory(pr) {
+    const reviews = el('div');
+    (pr.reviews || []).forEach((review, index) => {
+      if (index) reviews.append(el('br'));
+      reviews.append(`${review.user || '不明'}: ${review.state} (${date(review.submitted_at)})`);
+    });
+    if (!pr.reviews?.length) reviews.textContent = '—';
+    return reviews;
+  }
+  function branchText(pr) {
+    return `${pr.head?.ref || '不明'} → ${pr.base?.ref || '不明'}`;
+  }
+  function memberCounts(member) {
+    const ownedPrs = closedPrs.filter(pr => owner(pr) === member);
+    return {
+      assignedIssues: closedIssues.filter(issue => assignees(issue).includes(member)).length,
+      ownedPrs: ownedPrs.length,
+      linkedPrs: ownedPrs.filter(pr => relatedNumbers(pr).length > 0).length,
+      reviewedPrs: closedPrs.filter(pr => owner(pr) !== member && pr.reviews.some(review => review.user === member && review.submitted_at)).length,
+      mergedPrs: closedPrs.filter(pr => owner(pr) !== member && pr.mergedBy === member).length
+    };
+  }
   function renderMembers() {
     const rows = data.members.map(member => {
-      const assignedIssues = visibleIssues.filter(issue => assignees(issue).includes(member));
-      const ownedPrs = visiblePrs.filter(pr => owner(pr) === member);
-      const linkedPrs = ownedPrs.filter(pr => relatedNumbers(pr).length > 0);
-      const reviewedPrs = visiblePrs.filter(pr => owner(pr) !== member && pr.reviews.some(review => review.user === member && review.submitted_at));
-      const mergedPrs = visiblePrs.filter(pr => owner(pr) !== member && pr.mergedBy === member);
-      return [member, assignedIssues.length, ownedPrs.length, linkedPrs.length, reviewedPrs.length, mergedPrs.length];
+      const counts = memberCounts(member);
+      return [member, counts.assignedIssues, counts.ownedPrs, counts.linkedPrs, counts.reviewedPrs, counts.mergedPrs];
     });
     $('members').replaceChildren(table(['メンバー', '担当Issue', '担当PR', '関連Issueのある担当PR', '他者PRのレビュー', '他者PRのマージ'], rows));
   }
-  function renderDurations() {
-    const items = [
-      ...visibleIssues.map(item => ({kind: 'issue', item, start: item.created_at, end: item.closed_at || data.generatedAt, endLabel: item.closed_at ? 'Close' : '生成時'})),
-      ...visiblePrs.map(item => ({kind: 'pr', item, start: item.created_at, end: item.merged_at || item.closed_at || data.generatedAt, endLabel: item.merged_at ? 'マージ' : item.closed_at ? 'Close' : '生成時'}))
-    ];
-    items.sort((a, b) => (Date.parse(b.end) - Date.parse(b.start)) - (Date.parse(a.end) - Date.parse(a.start)));
-    $('durations').replaceChildren(table(['種類', '項目', '開始（作成）', '終了', '経過時間'], items.map(({kind, item, start, end, endLabel}) => [
-      kind === 'issue' ? 'Issue' : 'PR', link(kind, item, `#${item.number} ${item.title}`), date(start), `${date(end)}（${endLabel}）`, elapsed(start, end)
-    ])));
+  function spreadsheetCell(value) {
+    const cleaned = String(value ?? '').replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').trim();
+    return /^[=+\-@]/.test(cleaned) ? `'${cleaned}` : cleaned;
+  }
+  function spreadsheetDate(value) {
+    if (!value) return '';
+    const timestamp = Date.parse(value);
+    if (!Number.isFinite(timestamp)) return '';
+    const jst = new Date(timestamp + 9 * 60 * 60 * 1000);
+    const two = n => String(n).padStart(2, '0');
+    return `${jst.getUTCFullYear()}/${two(jst.getUTCMonth() + 1)}/${two(jst.getUTCDate())} ${two(jst.getUTCHours())}:${two(jst.getUTCMinutes())}`;
+  }
+  function durationText(start, end) {
+    const minutes = Math.floor((Date.parse(end) - Date.parse(start)) / 60000);
+    if (!Number.isFinite(minutes) || minutes < 0) return '算出不可';
+    return `${Math.floor(minutes / 1440)}日 ${Math.floor(minutes % 1440 / 60)}時間 ${minutes % 60}分`;
+  }
+  function spreadsheetTsv() {
+    const scope = $('filter').value === 'all' ? `${data.milestones.join('・')}＋未設定` : $('filter').value;
+    const lines = [];
+    const add = values => lines.push(values.map(spreadsheetCell).join('\t'));
+    const startTable = (title, headers) => {
+      if (lines.length) lines.push('');
+      add([`${title}（${scope}）`, `生成日時（日本時間）: ${spreadsheetDate(data.generatedAt)}`]);
+      add(headers);
+    };
+
+    startTable('集計', ['区分', 'メンバー', 'Issue数', 'PR数', '関連IssueありPR', '他者レビュー', '他者マージ']);
+    for (const member of data.members) {
+      const counts = memberCounts(member);
+      add(['メンバー（Close済み）', member, counts.assignedIssues, counts.ownedPrs,
+        counts.linkedPrs, counts.reviewedPrs, counts.mergedPrs]);
+    }
+    add(['全体（Close済み）', '', closedIssues.length, closedPrs.length, '', '', '']);
+    add(['全体（未Close）', '', openIssues.length, openPrs.length, '', '', '']);
+
+    startTable('PR', ['番号', '状態', 'Milestone', 'タイトル', 'GitHub URL', '担当者', '作成者',
+      '作成日時（日本時間）', '終了日時（日本時間）', 'マージ者', '所要時間', '関連Issue',
+      'レビュー履歴', 'ブランチ', '変更内容有無', 'AC確認結果有無']);
+    for (const pr of [...closedPrs, ...openPrs]) {
+      const state = pr.merged_at ? 'マージ済み' : pr.closed_at ? 'Close済み・未マージ' : '未Close';
+      const reviews = (pr.reviews || []).map(review => `${review.user || '不明'} ${review.state} ${spreadsheetDate(review.submitted_at)}`).join('；');
+      add([pr.number, state, milestone(pr), pr.title, pr.html_url, owner(pr), pr.user?.login,
+        spreadsheetDate(pr.created_at), spreadsheetDate(pr.merged_at || pr.closed_at), pr.mergedBy,
+        pr.closed_at ? durationText(pr.created_at, pr.merged_at || pr.closed_at) : '',
+        relatedNumbers(pr).map(number => `Issue #${number}`).join('、'), reviews,
+        branchText(pr), sectionText(pr.body, '変更内容') ? 'あり' : 'なし',
+        sectionText(pr.body, 'AC確認結果') ? 'あり' : 'なし']);
+    }
+
+    startTable('Issue', ['番号', '状態', 'Milestone', 'タイトル', 'GitHub URL', '担当者', '作成者',
+      '作成日時（日本時間）', 'Close日時（日本時間）', '所要時間', '関連PR', 'Close元PR', 'AC有無']);
+    for (const issue of [...closedIssues, ...openIssues]) {
+      add([issue.number, issue.closed_at ? 'Close済み' : '未Close', milestone(issue),
+        issue.title, issue.html_url, assignees(issue).join('、') || '未設定', issue.user?.login,
+        spreadsheetDate(issue.created_at), spreadsheetDate(issue.closed_at),
+        issue.closed_at ? durationText(issue.created_at, issue.closed_at) : '',
+        relatedPrNumbers(issue).map(number => `PR #${number}`).join('、'),
+        issue.closedByPr ? `PR #${issue.closedByPr}` : '', acStatus(issue)]);
+    }
+    return lines.join('\n');
+  }
+  async function copyOverview() {
+    const value = spreadsheetTsv();
+    const status = $('copy-status');
+    const fallback = $('copy-fallback');
+    fallback.hidden = true;
+    fallback.value = '';
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+      await navigator.clipboard.writeText(value);
+      status.textContent = 'タブ区切りの概要をコピーしました。';
+      return;
+    } catch (_) {
+      fallback.value = value;
+      fallback.hidden = false;
+      fallback.focus();
+      fallback.select();
+      try {
+        if (document.execCommand?.('copy')) {
+          fallback.hidden = true;
+          status.textContent = 'タブ区切りの概要をコピーしました。';
+          return;
+        }
+      } catch (_) { /* 手動コピーへ進む */ }
+      status.textContent = '自動コピーできませんでした。表示されたデータを選択してコピーしてください。';
+      fallback.focus();
+      fallback.select();
+    }
   }
   function renderIssues() {
-    const rows = visibleIssues.map(issue => {
-      const prs = visiblePrs.filter(pr => relatedNumbers(pr).includes(issue.number)).map(pr => pr.number);
-      const ac = /(^|\n)#{2,3}\s*AC(?:（受け入れ基準）)?/i.test(issue.body || '') ? '本文にAC見出しあり' : '本文で確認';
+    const rows = closedIssues.map(issue => {
       const body = append(el('div'), detail(issue.body), el('div', `作成: ${date(issue.created_at)} / Close: ${date(issue.closed_at)}`, 'muted'));
-      return [link('issue', issue, `#${issue.number} ${issue.title}`), milestone(issue), assignees(issue).join('、') || '未設定', issue.state, ac, joinedLinks('pr', prs), issue.closed_at ? (issue.closedByPr ? numberLink('pr', issue.closedByPr) : 'PRによるClose記録なし') : '—', body];
+      return [link('issue', issue, `#${issue.number} ${issue.title}`), highlightMissing(milestone(issue)),
+        highlightMissing(assignees(issue).join('、') || '未設定'), issue.state,
+        durationText(issue.created_at, issue.closed_at), highlightMissing(acStatus(issue)), joinedLinks('pr', relatedPrNumbers(issue), 'なし'),
+        issue.closedByPr ? numberLink('pr', issue.closedByPr) : 'PRによるClose記録なし', body];
     });
-    $('issues').replaceChildren(table(['Issue', 'Milestone', '担当者', '状態', 'AC', '関連PR', 'Close元', '詳細'], rows));
+    $('issues').replaceChildren(table(['Issue', 'Milestone', '担当者', '状態', '所要時間（作成→Close）', 'AC', '関連PR', 'Close元', '詳細'], rows));
   }
   function renderPrs() {
-    const rows = visiblePrs.map(pr => {
-      const reviews = el('div');
-      (pr.reviews || []).forEach((review, index) => {
-        if (index) reviews.append(el('br'));
-        reviews.append(`${review.user || '不明'}: ${review.state} (${date(review.submitted_at)})`);
-      });
-      if (!pr.reviews?.length) reviews.textContent = '—';
+    const rows = closedPrs.map(pr => {
       const details = el('div');
       const sections = ['関連Issue', '変更内容', 'AC確認結果', 'テスト結果'];
       for (const name of sections) {
         const value = sectionText(pr.body, name);
-        details.append(el('div', `${name}: ${value ? value.slice(0, 100) : '空欄または見出しなし'}`, 'muted'));
+        const line = el('div', null, 'muted');
+        line.append(`${name}: `, value ? value.slice(0, 100) : highlightMissing(name === '関連Issue' ? 'なし' : '空欄または見出しなし'));
+        details.append(line);
       }
       details.append(detail(pr.body));
       const first = pr.firstCommit?.sha ? `最初のコミット ${pr.firstCommit.sha.slice(0, 10)} / 親 ${pr.firstCommit.parents.join('、') || 'なし'}` : '最初のコミットを取得できません';
       details.append(el('div', `base: ${pr.base?.ref || '不明'} / ${first}`, 'muted'));
       details.append(el('div', `作成: ${date(pr.created_at)} / マージ: ${date(pr.merged_at)} / Close: ${date(pr.closed_at)}`, 'muted'));
-      return [link('pr', pr, `#${pr.number} ${pr.title}`), milestone(pr), owner(pr), pr.user?.login || '不明', joinedLinks('issue', relatedNumbers(pr)), reviews, pr.mergedBy || '—', details];
+      return [link('pr', pr, `#${pr.number} ${pr.title}`), highlightMissing(milestone(pr)), highlightMissing(owner(pr)),
+        pr.user?.login || '不明', joinedLinks('issue', relatedNumbers(pr), 'なし'), reviewHistory(pr),
+        pr.mergedBy || '—', durationText(pr.created_at, pr.merged_at || pr.closed_at), details];
     });
-    $('prs').replaceChildren(table(['PR', 'Milestone', '担当者', '作成者', '関連Issue', 'レビュー履歴', 'マージ者', '本文・ブランチ'], rows));
+    $('prs').replaceChildren(table(['PR', 'Milestone', '担当者', '作成者', '関連Issue', 'レビュー履歴', 'マージ者', '所要時間（作成→マージ／Close）', '本文・ブランチ'], rows));
+  }
+  function renderOpenIssues() {
+    const rows = openIssues.map(issue => [
+      link('issue', issue, `#${issue.number} ${issue.title}`), highlightMissing(milestone(issue)),
+      highlightMissing(assignees(issue).join('、') || '未設定'), highlightMissing(acStatus(issue)),
+      joinedLinks('pr', relatedPrNumbers(issue), 'なし'), date(issue.created_at), detail(issue.body)
+    ]);
+    $('open-issues').replaceChildren(table(['Issue・タイトル', 'Milestone', '担当者', 'AC有無', '関連PR', '開始（作成）', '詳細'], rows));
+  }
+  function renderOpenPrs() {
+    const rows = openPrs.map(pr => [
+      link('pr', pr, `#${pr.number} ${pr.title}`), highlightMissing(milestone(pr)), highlightMissing(owner(pr)),
+      pr.user?.login || '不明', joinedLinks('issue', relatedNumbers(pr), 'なし'),
+      reviewHistory(pr), pr.mergedBy || '—', date(pr.created_at), branchText(pr), detail(pr.body)
+    ]);
+    $('open-prs').replaceChildren(table(['PR・タイトル', 'Milestone', '担当者', '作成者', '関連Issue', 'レビュー履歴', 'マージ者', '開始（作成）', 'ブランチ', '本文'], rows));
   }
   function renderCommits() {
     $('history-note').textContent = data.historySince
@@ -175,12 +295,22 @@
     const include = item => selected === 'all' || milestone(item) === selected;
     visibleIssues = data.issues.filter(include);
     visiblePrs = data.prs.filter(include);
-    renderMembers(); renderDurations(); renderIssues(); renderPrs(); renderCommits();
+    closedIssues = visibleIssues.filter(issue => issue.closed_at != null);
+    closedPrs = visiblePrs.filter(pr => pr.closed_at != null);
+    openIssues = visibleIssues.filter(issue => issue.closed_at == null);
+    openPrs = visiblePrs.filter(pr => pr.closed_at == null);
+    renderMembers(); renderIssues(); renderPrs(); renderCommits();
+    renderOpenIssues(); renderOpenPrs();
   }
   const select = $('filter');
   [['all', 'すべて（指定Milestone＋未設定）'], ...data.milestones.map(value => [value, value]), ['未設定', '未設定']]
     .forEach(([value, label]) => { const option = el('option', label); option.value = value; select.append(option); });
-  select.addEventListener('change', render);
+  select.addEventListener('change', () => {
+    $('copy-status').textContent = '';
+    $('copy-fallback').hidden = true;
+    render();
+  });
+  $('copy-button').addEventListener('click', copyOverview);
   $('meta').textContent = `${data.repository} · 生成: ${date(data.generatedAt)} · 対象: ${data.milestones.join('、')}`;
 
   const preview = $('preview');
@@ -201,15 +331,26 @@
         el('div', `${commit.author} · ${date(commit.date)}`, 'muted'),
         el('div', commit.message, 'body'));
     } else {
-    const item = (anchor.dataset.kind === 'issue' ? issueMap : prMap).get(Number(anchor.dataset.number));
-    if (!item) return;
-    preview.replaceChildren(el('strong', `${anchor.dataset.kind === 'issue' ? 'Issue' : 'PR'} #${item.number} ${item.title}`),
-      el('div', `Milestone: ${milestone(item)} / 担当: ${assignees(item).join('、') || (anchor.dataset.kind === 'pr' ? owner(item) : '未設定')}`, 'muted'),
-      el('div', item.body || '本文なし', 'body'));
-    if (anchor.dataset.kind === 'pr') {
-      preview.append(el('div', `レビュー: ${(item.reviews || []).map(r => `${r.user} ${r.state}`).join('、') || 'なし'} / マージ者: ${item.mergedBy || '—'}`));
-    }
-    addComments(item);
+      const item = (anchor.dataset.kind === 'issue' ? issueMap : prMap).get(Number(anchor.dataset.number));
+      if (!item) return;
+      const isPr = anchor.dataset.kind === 'pr';
+      const meta = el('div', null, 'muted');
+      meta.append('Milestone: ', highlightMissing(milestone(item)), ' / 担当: ',
+        highlightMissing(assignees(item).join('、') || (isPr ? owner(item) : '未設定')));
+      preview.replaceChildren(el('strong', `${isPr ? 'PR' : 'Issue'} #${item.number} ${item.title}`),
+        meta, el('div', item.body || '本文なし', 'body'));
+      const related = el('div', null, 'muted');
+      related.append(isPr ? '関連Issue: ' : '関連PR: ',
+        joinedLinks(isPr ? 'issue' : 'pr', isPr ? relatedNumbers(item) : relatedPrNumbers(item), 'なし'));
+      preview.append(related);
+      if (isPr) {
+        preview.append(el('div', `レビュー: ${(item.reviews || []).map(r => `${r.user} ${r.state}`).join('、') || 'なし'} / マージ者: ${item.mergedBy || '—'}`));
+      } else {
+        const ac = el('div', null, 'muted');
+        ac.append('AC: ', highlightMissing(acStatus(item)));
+        preview.append(ac);
+      }
+      addComments(item);
     }
     const rect = anchor.getBoundingClientRect();
     preview.style.left = `${Math.max(8, Math.min(rect.right + 10, window.innerWidth - Math.min(510, window.innerWidth - 16)))}px`;

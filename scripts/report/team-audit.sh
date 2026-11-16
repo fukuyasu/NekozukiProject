@@ -7,7 +7,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "$REPO_ROOT"
 
 usage() {
-  echo "使い方: bash scripts/report/team-audit.sh --milestone lec06 [--milestone lec07 ...] [--output 出力先.html]" >&2
+  echo "使い方: bash scripts/report/team-audit.sh --milestone lec06 [--milestone lec07 ...] [--output ベース名.html]" >&2
 }
 
 MILESTONES=()
@@ -116,7 +116,18 @@ if [[ -n "$SINCE" ]]; then
 fi
 jq -s '.' "$TEMP_DIR/main-commits.jsonl" > "$TEMP_DIR/main-commits.json"
 
-GENERATED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+GENERATED_EPOCH="$(date -u '+%s')"
+GENERATED_AT="$(date -u -d "@${GENERATED_EPOCH}" '+%Y-%m-%dT%H:%M:%SZ')"
+FILE_STAMP="$(date -u -d "@$((GENERATED_EPOCH + 9 * 3600))" '+%Y-%m-%d_%H%M')"
+MILESTONE_TAG="$(jq -r 'join("-")' "$TEMP_DIR/milestones.json")"
+OUTPUT_DIR="$(dirname "$OUTPUT")"
+OUTPUT_STEM="$(basename "$OUTPUT" .html)"
+OUTPUT="${OUTPUT_DIR}/${OUTPUT_STEM}_${FILE_STAMP}_${MILESTONE_TAG}.html"
+SUFFIX=2
+while [[ -e "$OUTPUT" ]]; do
+  OUTPUT="${OUTPUT_DIR}/${OUTPUT_STEM}_${SUFFIX}_${FILE_STAMP}_${MILESTONE_TAG}.html"
+  SUFFIX=$((SUFFIX + 1))
+done
 jq -n --arg repository "$REPOSITORY" --arg generatedAt "$GENERATED_AT" --arg since "$SINCE" \
   --slurpfile milestones "$TEMP_DIR/milestones.json" --slurpfile members "$TEMP_DIR/members.json" \
   --slurpfile issues "$TEMP_DIR/issue-details.json" --slurpfile prs "$TEMP_DIR/pr-details.json" \
@@ -132,14 +143,16 @@ cat > "$HTML_TEMP" <<'HTML'
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>チーム開発確認</title>
 <style>
-:root{font-family:system-ui,sans-serif;color:#172335;background:#f5f7fa}body{margin:0}header{background:#17365e;color:white;padding:1.4rem max(1rem,calc((100vw - 75rem)/2))}h1{margin:.1rem 0}.wrap{max-width:75rem;margin:auto;padding:1rem}section{background:white;border:1px solid #d8e0e8;border-radius:.5rem;padding:1rem;margin:1rem 0}h2{margin-top:0}label{font-weight:700}select{font:inherit;padding:.35rem;margin-left:.5rem}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{padding:.5rem;border-bottom:1px solid #d8e0e8;text-align:left;vertical-align:top}th{background:#e9f0f8;position:sticky;top:0}a{color:#075ca2}a:hover{text-decoration-thickness:2px}.scroll{overflow:auto;max-height:34rem}.muted{color:#526477}.body{white-space:pre-wrap;overflow-wrap:anywhere;max-height:19rem;overflow:auto;background:#f5f7fa;padding:.7rem}.row-detail{padding:.7rem;border-top:1px solid #d8e0e8}details{margin:.3rem 0}summary{cursor:pointer;font-weight:600}.preview{position:fixed;z-index:20;background:#10263f;color:white;border:2px solid #7dd3fc;border-radius:.5rem;padding:1rem;width:min(31rem,calc(100vw - 2rem));max-height:min(26rem,calc(100vh - 2rem));overflow:auto;box-shadow:0 1rem 2rem #0008}.preview[hidden]{display:none}.preview .body{background:#183958;color:white}.preview a{color:#a9e6ff}.chip{display:inline-block;background:#e9f0f8;border-radius:1rem;padding:.1rem .55rem;margin:.1rem} .empty{color:#526477}
+:root{font-family:system-ui,sans-serif;color:#172335;background:#f5f7fa}body{margin:0}header{background:#17365e;color:white;padding:1.4rem max(1rem,calc((100vw - 75rem)/2))}h1{margin:.1rem 0}.wrap{max-width:75rem;margin:auto;padding:1rem}section{background:white;border:1px solid #d8e0e8;border-radius:.5rem;padding:1rem;margin:1rem 0}h2{margin-top:0}label{font-weight:700}select,button{font:inherit;padding:.35rem;margin-left:.5rem}button{background:#075ca2;color:white;border:0;border-radius:.3rem;cursor:pointer}button:hover{background:#064b85}#copy-status{margin-left:.6rem}#copy-fallback{display:block;width:100%;min-height:8rem;margin-top:.6rem;font:inherit}#copy-fallback[hidden]{display:none}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{padding:.5rem;border-bottom:1px solid #d8e0e8;text-align:left;vertical-align:top}th{background:#e9f0f8;position:sticky;top:0}a{color:#075ca2}a:hover{text-decoration-thickness:2px}.scroll{overflow:auto;max-height:34rem}.muted{color:#526477}.body{white-space:pre-wrap;overflow-wrap:anywhere;max-height:19rem;overflow:auto;background:#f5f7fa;padding:.7rem}.row-detail{padding:.7rem;border-top:1px solid #d8e0e8}details{margin:.3rem 0}summary{cursor:pointer;font-weight:600}.preview{position:fixed;z-index:20;background:#10263f;color:white;border:2px solid #7dd3fc;border-radius:.5rem;padding:1rem;width:min(31rem,calc(100vw - 2rem));max-height:min(26rem,calc(100vh - 2rem));overflow:auto;box-shadow:0 1rem 2rem #0008}.preview[hidden]{display:none}.preview .body{background:#183958;color:white}.preview a{color:#a9e6ff}.chip{display:inline-block;background:#e9f0f8;border-radius:1rem;padding:.1rem .55rem;margin:.1rem} .empty{color:#526477}
+.missing{color:#b00020;font-weight:800}.preview .missing{color:#ff9bad}.preview .muted{color:#d7e4f2}
 </style></head><body><header><h1>チーム開発確認</h1><div id="meta"></div></header><main class="wrap">
-<section><label for="filter">表示対象</label><select id="filter"></select><p class="muted">「すべて」は指定したMilestoneと未設定を各1件ずつ含みます。数値や記録を根拠に教員が確認してください。</p></section>
+<section><label for="filter">表示対象</label><select id="filter"></select><button id="copy-button" type="button">概要をコピー</button><span id="copy-status" role="status" aria-live="polite"></span><textarea id="copy-fallback" aria-label="手動コピー用のタブ区切りデータ" readonly hidden></textarea><p class="muted">「すべて」は指定したMilestoneと未設定を各1件ずつ含みます。概要をコピーすると、表示対象の集計・PR・IssueをSpreadsheetへ貼り付けられるタブ区切りデータをコピーします。</p></section>
 <section><h2>メンバー別件数</h2><div class="scroll" id="members"></div></section>
-<section><h2>所要時間</h2><p class="muted">Issueは作成→Close、PRは作成→マージ（未マージでClose済みならClose）です。Openな項目は生成日時までの経過時間です。</p><div class="scroll" id="durations"></div></section>
-<section><h2>Issue</h2><div class="scroll" id="issues"></div></section>
-<section><h2>Pull Request</h2><div class="scroll" id="prs"></div></section>
+<section><h2>Issue（Close済み）</h2><div class="scroll" id="issues"></div></section>
+<section><h2>Pull Request（Close済み）</h2><div class="scroll" id="prs"></div></section>
 <section><h2>mainのコミット履歴</h2><p class="muted" id="history-note"></p><div class="scroll" id="commits"></div></section>
+<section><h2>未CloseのIssue</h2><div class="scroll" id="open-issues"></div></section>
+<section><h2>未CloseのPull Request</h2><div class="scroll" id="open-prs"></div></section>
 <aside id="preview" class="preview" role="tooltip" hidden></aside>
 </main><script id="audit-data" type="application/json">
 HTML
